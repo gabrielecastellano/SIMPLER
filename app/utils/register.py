@@ -1,5 +1,3 @@
-
-
 def get_environment(env_name):
     try:
         if env_name in ('tictactoe'):
@@ -23,15 +21,18 @@ def get_environment(env_name):
         elif env_name in ('remote'):
             from remote.envs.remote import RemoteEnv
             return RemoteEnv
+        elif env_name in ('dune_imperium'):
+            from dune_imperium.envs.dune_imperium import DuneImperiumEnv
+            return DuneImperiumEnv
         else:
             raise Exception(f'No environment found for {env_name}')
     except SyntaxError as e:
         print(e)
         raise Exception(f'Syntax Error for {env_name}!')
     except:
-        raise Exception(f'Install the environment first using: \nbash scripts/install_env.sh {env_name}\nAlso ensure the environment is added to /utils/register.py')
+        raise Exception(f'Install the environment first using: \nbash scripts/install_env.sh {env_name}\n'
+                        f'Also ensure the environment is added to /utils/register.py')
     
-
 
 def get_network_arch(env_name):
     if env_name in ('tictactoe'):
@@ -55,6 +56,8 @@ def get_network_arch(env_name):
     elif env_name in ('remote'):
         from models.remote.models import CustomPolicy
         return CustomPolicy
+    elif env_name in ('dune_imperium'):
+        from models.dune_imperium.models import CustomPolicy
+        return CustomPolicy
     else:
         raise Exception(f'No model architectures found for {env_name}')
-

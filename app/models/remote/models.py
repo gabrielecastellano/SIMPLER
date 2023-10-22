@@ -16,6 +16,19 @@ POLICY_DEPTH = 1
 
 
 class CustomPolicy(ActorCriticPolicy):
+    """
+        Policy object that implements actor critic
+
+        :param sess: (TensorFlow session) The current TensorFlow session
+        :param ob_space: (Gym Space) The observation space of the environment
+        :param ac_space: (Gym Space) The action space of the environment
+        :param n_env: (int) The number of environments to run
+        :param n_steps: (int) The number of steps to run for each environment
+        :param n_batch: (int) The number of batch to run (n_envs * n_steps)
+        :param reuse: (bool) If the policy is reusable or not
+        :param scale: (bool) whether or not to scale the input
+        """
+
     def __init__(self, sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=False, **kwargs):
         super(CustomPolicy, self).__init__(sess, ob_space, ac_space, n_env, n_steps, n_batch, reuse=reuse, scale=True)
 
@@ -47,6 +60,10 @@ class CustomPolicy(ActorCriticPolicy):
         return self.sess.run(self.policy_proba, {self.obs_ph: obs})
 
     def value(self, obs, state=None, mask=None):
+        # value flat is self.value_fn[:, 0]
+        # I should split obs in the various states, feed them to value_flat one by one, then apply one last layer to
+        # produce a single value. Similar for the step and proba_step. But for sure this is problematic with batches, as
+        # each sample will have different number of states!
         return self.sess.run(self.value_flat, {self.obs_ph: obs})
 
 

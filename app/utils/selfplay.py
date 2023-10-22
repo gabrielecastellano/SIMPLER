@@ -89,7 +89,6 @@ def selfplay_wrapper(env):
 
             return observation, reward, done, None
 
-
         def step(self, action):
             self.render()
             observation, reward, done, _ = super(SelfPlayEnv, self).step(action)
@@ -101,7 +100,6 @@ def selfplay_wrapper(env):
                 package = self.continue_game()
                 if package[0] is not None:
                     observation, reward, done, _ = package
-
 
             agent_reward = reward[self.agent_player_num]
             logger.debug(f'\nReward To Agent: {agent_reward}')
