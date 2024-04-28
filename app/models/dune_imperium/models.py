@@ -17,6 +17,19 @@ DEPTH = 1
 VALUE_DEPTH = 1
 POLICY_DEPTH = 1
 
+CARD_INPUT_SIZE = 85
+INTRIGUE_INPUT_SIZE = 52
+TECH_INPUT_SIZE = 19
+LEADER_INPUT_SIZE = 14
+CONFLICT_INPUT_SIZE = 22
+
+CONFLICT_OFFSET = 320
+IMPERIUM_OFFSET = 342
+
+PLAYER_INPUT_SIZE = 804
+PLAYERS_OFFSET = 479
+CURRENT_PLAYER_INPUT_SIZE = 3*INTRIGUE_INPUT_SIZE + CARD_INPUT_SIZE
+CURRENT_PLAYER_OFFSET = 3695
 
 class CustomPolicy(ActorCriticPolicy):
     """
@@ -50,18 +63,60 @@ class CustomPolicy(ActorCriticPolicy):
 
             # Determine the number of actions dynamically based on the first dimension of ob_space
             N_ACTIONS = tf.shape(obs)[1]
-            FEATURE_SIZE = obs.shape[2]
+            INPUT_SIZE = obs.shape[2]
 
-            print(f"FEATURE_SIZE = {FEATURE_SIZE}")
+            print(f"INPUT_SIZE = {INPUT_SIZE}")
             print(f"N_ACTIONS = {N_ACTIONS}")
 
+            round_number = obs[:, 0:1]
+            player = obs[:, 1:5]
+            phase = obs[:, 5:11]
+            spaces = obs[:, 11:22*14]
+            mentat = obs[:, 22*14:22*14+1]
+            reserve = obs[:, IMPERIUM_OFFSET:IMPERIUM_OFFSET+3]
+
+            conflict = conflict_embedding_layer(obs[:, CONFLICT_OFFSET:CONFLICT_OFFSET+CONFLICT_INPUT_SIZE])
+            imperium_row = card_embedding_layer(obs[:, IMPERIUM_OFFSET+3:IMPERIUM_OFFSET+3+CARD_INPUT_SIZE])
+            techs = tech_embedding_layer(obs[:, IMPERIUM_OFFSET+3+CARD_INPUT_SIZE:IMPERIUM_OFFSET+3+CARD_INPUT_SIZE+TECH_INPUT_SIZE])
+            trashed_intrigues = intrigue_embedding_layer(obs[:, IMPERIUM_OFFSET+3+CARD_INPUT_SIZE+TECH_INPUT_SIZE:IMPERIUM_OFFSET+3+CARD_INPUT_SIZE+TECH_INPUT_SIZE+INTRIGUE_INPUT_SIZE])
+
+            # players
+            player_1 = player_layer(obs[:, PLAYERS_OFFSET:PLAYERS_OFFSET + PLAYER_INPUT_SIZE])
+            player_2 = player_layer(obs[:, PLAYERS_OFFSET + PLAYER_INPUT_SIZE:PLAYERS_OFFSET + 2 * PLAYER_INPUT_SIZE])
+            player_3 = player_layer(obs[:, PLAYERS_OFFSET + 2 * PLAYER_INPUT_SIZE:PLAYERS_OFFSET + 3 * PLAYER_INPUT_SIZE])
+            player_4 = player_layer(obs[:, PLAYERS_OFFSET + 3 * PLAYER_INPUT_SIZE:PLAYERS_OFFSET + 4 * PLAYER_INPUT_SIZE])
+
+            # current player
+            current_player = current_player_layer(obs[:, CURRENT_PLAYER_OFFSET:CURRENT_PLAYER_INPUT_SIZE])
+
+            embedded_obs = tf.concat([
+                round_number,
+                player,
+                phase,
+                spaces,
+                mentat,
+                reserve,
+                conflict,
+                imperium_row,
+                techs,
+                trashed_intrigues,
+                player_1,
+                player_2,
+                player_3,
+                player_4,
+                current_player,
+            ], axis=-1)
+
+            # feature extraction
+            EMBEDDING_SIZE = embedded_obs.shape[2]
+
             self._pdtype = CategoricalProbabilityDistributionType(N_ACTIONS)
-            extracted_features = resnet_extractor(obs, FEATURE_SIZE)
+            extracted_features = resnet_extractor(embedded_obs, EMBEDDING_SIZE)
 
-            print(f"extracted_features  {extracted_features}")
+            print(f"extracted_features {extracted_features}")
 
-            self._policy = policy_head(extracted_features, legal_actions, FEATURE_SIZE, N_ACTIONS)
-            self._value_fn, self.q_value = value_head(extracted_features, FEATURE_SIZE, N_ACTIONS)
+            self._policy = policy_head(extracted_features, legal_actions, EMBEDDING_SIZE, N_ACTIONS)
+            self._value_fn, self.q_value = value_head(extracted_features, EMBEDDING_SIZE, N_ACTIONS)
 
             self._proba_distribution = CategoricalProbabilityDistribution(self._policy)
             # override instance neglogp method as library one does not work with dynamic sized output
@@ -70,7 +125,6 @@ class CustomPolicy(ActorCriticPolicy):
             print(f"self._policy {self._policy}")
             print(f"self._value_fn {self._value_fn}")
             print(f"self._proba_distribution {self._proba_distribution}")
-
 
         self._setup_init()
 
@@ -127,10 +181,10 @@ def policy_head(y, legal_actions, FEATURE_SIZE, N_ACTIONS):
     return policy
 
 
-def resnet_extractor(y, FEATURE_SIZE):
-    y = dense(y, FEATURE_SIZE)
+def resnet_extractor(y, n):
+    y = dense(y, n)
     for _ in range(DEPTH):
-        y = residual(y, FEATURE_SIZE)
+        y = residual(y, n)
     return y
 
 
@@ -178,3 +232,46 @@ def neglogp(self, x):
     one_hot_actions = tf.one_hot(x, tf.shape(self.logits)[-1])
     return tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.logits,
                                                       labels=tf.stop_gradient(one_hot_actions))
+
+
+def card_embedding_layer(inputs):
+    return tf.keras.layers.Embedding(85, 16, name='card_embedding')(inputs)
+
+def intrigue_embedding_layer(inputs):
+    return tf.keras.layers.Embedding(52, 16, name='intrigue_embedding')(inputs)
+
+def tech_embedding_layer(inputs):
+    return tf.keras.layers.Embedding(19, 8, name='tech_embedding')(inputs)
+
+def conflict_embedding_layer(inputs):
+    return tf.keras.layers.Embedding(22, 8, name='conflict_embedding')(inputs)
+
+def leader_embedding_layer(inputs):
+    return tf.keras.layers.Embedding(14, 8, name='card_embedding')(inputs)
+
+def player_layer(inputs):
+    return tf.concat([
+        leader_embedding_layer(inputs[:, 0:LEADER_INPUT_SIZE]),
+        inputs[:, LEADER_INPUT_SIZE:30],    # scalars
+        card_embedding_layer(inputs[:, LEADER_INPUT_SIZE+30:LEADER_INPUT_SIZE+30+CARD_INPUT_SIZE]),                                 # discard
+        card_embedding_layer(inputs[:, LEADER_INPUT_SIZE + 30 + CARD_INPUT_SIZE:LEADER_INPUT_SIZE + 30 + 2 * CARD_INPUT_SIZE]),     # hand
+        card_embedding_layer(inputs[:, LEADER_INPUT_SIZE + 30 + 2 * CARD_INPUT_SIZE:LEADER_INPUT_SIZE + 30 + 3 * CARD_INPUT_SIZE]), # deck
+        card_embedding_layer(inputs[:, LEADER_INPUT_SIZE + 30 + 3 * CARD_INPUT_SIZE:LEADER_INPUT_SIZE + 30 + 4 * CARD_INPUT_SIZE]), # top 1
+        card_embedding_layer(inputs[:, LEADER_INPUT_SIZE + 30 + 4 * CARD_INPUT_SIZE:LEADER_INPUT_SIZE + 30 + 5 * CARD_INPUT_SIZE]), # top 2
+        card_embedding_layer(inputs[:, LEADER_INPUT_SIZE + 30 + 5 * CARD_INPUT_SIZE:LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE]), # in play
+        intrigue_embedding_layer(inputs[:, LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE:LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE + INTRIGUE_INPUT_SIZE]), # in play intrigues
+        tech_embedding_layer(inputs[:, LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE + INTRIGUE_INPUT_SIZE:LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE + INTRIGUE_INPUT_SIZE + TECH_INPUT_SIZE]), # techs
+        tech_embedding_layer(inputs[:, LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE + INTRIGUE_INPUT_SIZE + TECH_INPUT_SIZE:LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE + INTRIGUE_INPUT_SIZE + 2*TECH_INPUT_SIZE]), # activated techs
+        inputs[:, LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE + INTRIGUE_INPUT_SIZE + 2*TECH_INPUT_SIZE:LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE + INTRIGUE_INPUT_SIZE + 2*TECH_INPUT_SIZE + 5],   # baron
+        card_embedding_layer(inputs[:, LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE + INTRIGUE_INPUT_SIZE + 2 * TECH_INPUT_SIZE + 5:LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE + INTRIGUE_INPUT_SIZE + 2 * TECH_INPUT_SIZE + 5 + CARD_INPUT_SIZE]), # helena
+        card_embedding_layer(inputs[:, LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE + INTRIGUE_INPUT_SIZE + 2 * TECH_INPUT_SIZE + 5 + CARD_INPUT_SIZE:LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE + INTRIGUE_INPUT_SIZE + 2 * TECH_INPUT_SIZE + 5 + 2 * CARD_INPUT_SIZE]), # ilesa
+        inputs[:, LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE + INTRIGUE_INPUT_SIZE + 2 * TECH_INPUT_SIZE + 5 + 2*CARD_INPUT_SIZE:LEADER_INPUT_SIZE + 30 + 6 * CARD_INPUT_SIZE + INTRIGUE_INPUT_SIZE + 2 * TECH_INPUT_SIZE + 5 + 2*CARD_INPUT_SIZE + 4], # tessia
+    ], axis=-1)
+
+def current_player_layer(inputs):
+    return tf.concat([
+        intrigue_embedding_layer(inputs[:, 0:INTRIGUE_INPUT_SIZE]),
+        intrigue_embedding_layer(inputs[:, INTRIGUE_INPUT_SIZE:2*INTRIGUE_INPUT_SIZE]),
+        intrigue_embedding_layer(inputs[:, 2*INTRIGUE_INPUT_SIZE:3*INTRIGUE_INPUT_SIZE]),
+        card_embedding_layer(inputs[:, 3*INTRIGUE_INPUT_SIZE:3*INTRIGUE_INPUT_SIZE+CARD_INPUT_SIZE])
+    ], axis=-1)
